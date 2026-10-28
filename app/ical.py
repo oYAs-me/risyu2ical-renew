@@ -70,7 +70,7 @@ def build_icalendar(
                     event.add("LOCATION", course.classroom)
                 event.add(
                     "RRULE",
-                    {"FREQ": "WEEKLY", "BYDAY": _BYDAY[weekday], "COUNT": schedule.class_count},
+                    {"FREQ": "WEEKLY", "BYDAY": _BYDAY[weekday], "COUNT": 8},
                 )
                 exdates = [
                     datetime.combine(day, start_time, tzinfo=tz)
