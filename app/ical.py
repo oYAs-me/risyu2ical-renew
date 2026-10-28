@@ -68,9 +68,10 @@ def build_icalendar(
                     event.add("DESCRIPTION", description)
                 if course.classroom:
                     event.add("LOCATION", course.classroom)
+                recurrence_count = 7 + len(schedule.exdates.get(weekday, ()))
                 event.add(
                     "RRULE",
-                    {"FREQ": "WEEKLY", "BYDAY": _BYDAY[weekday], "COUNT": 8},
+                    {"FREQ": "WEEKLY", "BYDAY": _BYDAY[weekday], "COUNT": recurrence_count},
                 )
                 exdates = [
                     datetime.combine(day, start_time, tzinfo=tz)
