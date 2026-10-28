@@ -5,7 +5,7 @@ data/
 risyu2ical*
 
 # Ignore Python cache files (anywhere in the repository)
-/app/__pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
