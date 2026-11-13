@@ -19,6 +19,12 @@ app = FastAPI(title="risyu2ical-renew", version="0.1.0")
 DATA_DIR = Path(os.getenv("RISYU2ICAL_DATA_DIR", "data"))
 _raw_public_path = os.getenv("PUBLIC_PATH", "/tool/risyu2ical").strip("/")
 PUBLIC_PATH = f"/{_raw_public_path}" if _raw_public_path else ""
+PUBLIC_ORIGIN = os.getenv("PUBLIC_ORIGIN", "https://yhop.net").rstrip("/")
+SITE_NAME = "埼玉大学 履修 iCalendar"
+DEFAULT_DESCRIPTION = (
+    "埼玉大学 CampusSquare の履修登録データ（RSReferCsv）から、"
+    "Google Calendar・Apple カレンダー・Outlook に登録できる iCalendar 購読用 URL を作成します。"
+)
 store = CalendarStore(os.getenv("RISYU2ICAL_DB", str(DATA_DIR / "calendars.sqlite3")))
 syllabus_client = SyllabusClient(
     enabled=os.getenv("SYLLABUS_ENABLED", "0").lower() in {"1", "true", "yes"},
@@ -30,21 +36,48 @@ if PUBLIC_PATH:
     app.mount(f"{PUBLIC_PATH}/static", StaticFiles(directory=Path(__file__).parent / "static"), name="public_static")
 
 
-def _page_layout(title: str, body_html: str) -> str:
-    safe_title = escape(title)
+def _page_layout(
+    title: str | None,
+    body_html: str,
+    *,
+    description: str = DEFAULT_DESCRIPTION,
+    noindex: bool = False,
+) -> str:
+    full_title = f"{title} - {SITE_NAME}" if title else SITE_NAME
+    safe_title = escape(full_title)
+    safe_site = escape(SITE_NAME)
+    safe_desc = escape(description)
+    og_url = escape(f"{PUBLIC_ORIGIN}{PUBLIC_PATH}/")
+    og_image = escape(f"{PUBLIC_ORIGIN}{PUBLIC_PATH}/static/ogp.png")
+    robots_tag = '\n  <meta name="robots" content="noindex">' if noindex else ""
     return f"""<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#22467E">
+  <meta name="description" content="{safe_desc}">{robots_tag}
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:site_name" content="{safe_site}">
+  <meta property="og:title" content="{safe_title}">
+  <meta property="og:description" content="{safe_desc}">
+  <meta property="og:url" content="{og_url}">
+  <meta property="og:image" content="{og_image}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{safe_title}">
+  <meta name="twitter:description" content="{safe_desc}">
+  <meta name="twitter:image" content="{og_image}">
   <link rel="stylesheet" href="{PUBLIC_PATH}/static/style.css">
-  <title>{safe_title} - 履修 iCalendar</title>
+  <title>{safe_title}</title>
 </head>
 <body>
   <header class="site-header">
     <div class="site-header__inner">
-      <a class="site-header__brand" href="{PUBLIC_PATH}/">履修 iCalendar</a>
-      <span class="site-header__meta">CampusSquare RSReferCsv → iCalendar 変換</span>
+      <a class="site-header__brand" href="{PUBLIC_PATH}/">{safe_site}</a>
+      <span class="site-header__meta">埼玉大学 CampusSquare RSReferCsv → iCalendar 変換</span>
     </div>
   </header>
   <div class="page-container">
@@ -53,7 +86,7 @@ def _page_layout(title: str, body_html: str) -> str:
     </main>
   </div>
   <footer class="site-footer">
-    <p>履修登録データ（RSReferCsv）からカレンダー購読用 URL（.ics）を生成します。</p>
+    <p>埼玉大学の履修登録データ（RSReferCsv）からカレンダー購読用 URL（.ics）を生成します。</p>
   </footer>
   <script>
     (() => {{
@@ -80,7 +113,8 @@ _EXTERNAL_ICON = (
 
 def _calendar_guides_html(verb: str, calendar_url: str | None = None) -> str:
     if calendar_url:
-        webcal_url = f"webcal://yhop.net{calendar_url}"
+        public_host = PUBLIC_ORIGIN.removeprefix("https://").removeprefix("http://")
+        webcal_url = f"webcal://{public_host}{calendar_url}"
         google_href = escape(f"https://calendar.google.com/calendar/r?cid={quote(webcal_url, safe='')}")
         apple_href = escape(webcal_url)
         apple_extra = ""
@@ -110,13 +144,14 @@ def _calendar_guides_html(verb: str, calendar_url: str | None = None) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    body = f"""<h1>履修 iCalendar の作成</h1>
-<p class="lead">CampusSquareの「履修登録操作／履修登録状況照会」で各講義を「テキスト出力」してください。<br>
+    body = f"""<h1>埼玉大学 履修 iCalendar の作成</h1>
+<p class="lead">埼玉大学 CampusSquare の「履修登録操作／履修登録状況照会」で各講義を「テキスト出力」してください。<br>
 ダウンロードした <strong>RSReferCsv</strong> をアップロードすると、講義スケジュールをカレンダーアプリに登録できる URL を作成します。</p>
 <ol class="steps-list">
-  <li>CampusSquare から各ターム・各講義の <code>RSReferCsv</code> をダウンロードします。</li>
+  <li>埼玉大学 CampusSquare から各ターム・各講義の <code>RSReferCsv</code> をダウンロードします。</li>
   <li>下のフォームから CSV ファイルを選択します（複数ファイルを一度に選択できます）。</li>
   <li>「カレンダーを作成」を押すと、購読用の iCalendar URL が発行されます。</li>
+  <li>下のリンクから Google Calendar・Apple カレンダー・Outlook へすぐに登録できます。</li>
 </ol>
 <form class="form-section" action="{PUBLIC_PATH}/generate" method="post" enctype="multipart/form-data">
   <label class="field-label" for="file">
@@ -148,12 +183,12 @@ def index() -> str:
   }});
 }})();
 </script>"""
-    return _page_layout("トップ", body)
+    return _page_layout(None, body)
 
 
 def _result_page(calendar_name: str, url: str, course_count: int) -> str:
     safe_name, safe_url = escape(calendar_name), escape(url)
-    full_url = f"https://yhop.net{safe_url}"
+    full_url = f"{escape(PUBLIC_ORIGIN)}{safe_url}"
     body = f"""<div class="banner banner--success" role="status">
   <svg class="banner__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
@@ -192,7 +227,7 @@ def _result_page(calendar_name: str, url: str, course_count: int) -> str:
   }});
 }})();
 </script>"""
-    return _page_layout("作成しました", body)
+    return _page_layout("作成しました", body, noindex=True)
 
 
 def _error_page(message: str) -> HTMLResponse:
@@ -210,7 +245,7 @@ def _error_page(message: str) -> HTMLResponse:
 <div class="button-group">
   <a class="btn btn--outline" href="{PUBLIC_PATH}/">入力画面へ戻る</a>
 </div>"""
-    return HTMLResponse(_page_layout("作成できません", body), status_code=502)
+    return HTMLResponse(_page_layout("作成できません", body, noindex=True), status_code=502)
 
 
 @app.post("/upload")
