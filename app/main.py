@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from html import escape
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
@@ -16,7 +17,8 @@ from .syllabus import SyllabusClient, SyllabusError
 
 app = FastAPI(title="risyu2ical-renew", version="0.1.0")
 DATA_DIR = Path(os.getenv("RISYU2ICAL_DATA_DIR", "data"))
-PUBLIC_PATH = "/" + os.getenv("PUBLIC_PATH", "/tool/risyu2ical").strip("/")
+_raw_public_path = os.getenv("PUBLIC_PATH", "/tool/risyu2ical").strip("/")
+PUBLIC_PATH = f"/{_raw_public_path}" if _raw_public_path else ""
 store = CalendarStore(os.getenv("RISYU2ICAL_DB", str(DATA_DIR / "calendars.sqlite3")))
 syllabus_client = SyllabusClient(
     enabled=os.getenv("SYLLABUS_ENABLED", "0").lower() in {"1", "true", "yes"},
@@ -26,49 +28,187 @@ syllabus_client = SyllabusClient(
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
+def _page_layout(title: str, body_html: str) -> str:
+    safe_title = escape(title)
+    return f"""<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{PUBLIC_PATH}/static/style.css">
+  <title>{safe_title} - 履修 iCalendar</title>
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="site-header__brand" href="{PUBLIC_PATH}/">履修 iCalendar</a>
+      <span class="site-header__meta">CampusSquare RSReferCsv → iCalendar 変換</span>
+    </div>
+  </header>
+  <div class="page-container">
+    <main class="card">
+{body_html}
+    </main>
+  </div>
+  <footer class="site-footer">
+    <p>履修登録データ（RSReferCsv）からカレンダー購読用 URL（.ics）を生成します。</p>
+  </footer>
+  <script>
+    (() => {{
+      const isApple = /iPhone|iPad|iPod|Macintosh/i.test(navigator.userAgent);
+      if (!isApple) return;
+      for (const a of document.querySelectorAll("a[data-apple-href]")) {{
+        a.setAttribute("href", a.getAttribute("data-apple-href"));
+      }}
+    }})();
+  </script>
+</body>
+</html>"""
+
+
+_EXTERNAL_ICON = (
+    '<svg class="external-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">'
+    '<path d="M6 3.5H3.5C2.95 3.5 2.5 3.95 2.5 4.5V12.5C2.5 13.05 2.95 13.5 3.5 13.5H11.5C12.05 13.5 12.5 13.05 12.5 12.5V10" '
+    'stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'
+    '<path d="M9.5 2.5H13.5V6.5M13.5 2.5L7.5 8.5" '
+    'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
+    '</svg>'
+)
+
+
+def _calendar_guides_html(verb: str, calendar_url: str | None = None) -> str:
+    if calendar_url:
+        webcal_url = f"webcal://yhop.net{calendar_url}"
+        google_href = escape(f"https://calendar.google.com/calendar/r?cid={quote(webcal_url, safe='')}")
+        apple_href = escape(webcal_url)
+        apple_extra = ""
+        outlook_href = "https://outlook.live.com/calendar/0/addfromweb"
+    else:
+        google_href = "https://calendar.google.com/calendar/r/settings/addbyurl"
+        apple_href = "https://www.icloud.com/calendar/"
+        apple_extra = ' data-apple-href="calshow://"'
+        outlook_href = "https://outlook.live.com/calendar/"
+
+    return f"""<h2>カレンダーアプリへの追加</h2>
+<dl class="guide-list">
+  <div class="guide-item">
+    <dt><a class="guide-app-link" href="{google_href}" target="_blank" rel="noopener noreferrer">Google Calendar{_EXTERNAL_ICON}</a></dt>
+    <dd>設定の「カレンダーを追加」から「URLで追加」を選び、{escape(verb)}。</dd>
+  </div>
+  <div class="guide-item">
+    <dt><a class="guide-app-link" href="{apple_href}"{apple_extra} target="_blank" rel="noopener noreferrer">Apple カレンダー{_EXTERNAL_ICON}</a></dt>
+    <dd>「ファイル」→「新規照会カレンダー」でURLを登録します。</dd>
+  </div>
+  <div class="guide-item">
+    <dt><a class="guide-app-link" href="{outlook_href}" target="_blank" rel="noopener noreferrer">Outlook{_EXTERNAL_ICON}</a></dt>
+    <dd>「予定表を追加」→「Webから購読」でURLを登録します。</dd>
+  </div>
+</dl>"""
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return f"""<!doctype html>
-<html lang="ja"><head><meta charset="utf-8"><link rel="stylesheet" href="{PUBLIC_PATH}/static/style.css"><title>履修 iCalendar</title></head>
-<body><main>
-<h1>履修 iCalendar</h1>
-<p>CampusSquareの「履修登録操作／履修登録状況照会」で各講義を「テキスト出力」してください。<br>
-そこでダウンロードできる "RSReferCsv" をアップロードすることで、講義をカレンダーアプリに登録できます。</p>
-<p>RSReferCsvを複数選択すると一度にカレンダーが作成されるので便利です</p>
-<form action="{PUBLIC_PATH}/generate" method="post" enctype="multipart/form-data">
-  <label for="file">RSReferCsv</label>
-  <input id="file" type="file" name="files" accept=".csv" multiple required>
-  <button type="submit">カレンダーを作成</button>
+    body = f"""<h1>履修 iCalendar の作成</h1>
+<p class="lead">CampusSquareの「履修登録操作／履修登録状況照会」で各講義を「テキスト出力」してください。<br>
+ダウンロードした <strong>RSReferCsv</strong> をアップロードすると、講義スケジュールをカレンダーアプリに登録できる URL を作成します。</p>
+<ol class="steps-list">
+  <li>CampusSquare から各ターム・各講義の <code>RSReferCsv</code> をダウンロードします。</li>
+  <li>下のフォームから CSV ファイルを選択します（複数ファイルを一度に選択できます）。</li>
+  <li>「カレンダーを作成」を押すと、購読用の iCalendar URL が発行されます。</li>
+</ol>
+<form class="form-section" action="{PUBLIC_PATH}/generate" method="post" enctype="multipart/form-data">
+  <label class="field-label" for="file">
+    <span>RSReferCsv ファイル</span>
+    <span class="requirement-badge">必須</span>
+  </label>
+  <p id="file-help" class="support-text">複数選択すると一度にカレンダーが作成されます（最大8ファイル、各10MBまで）。</p>
+  <div class="file-input-wrap">
+    <input id="file" type="file" name="files" accept=".csv" multiple required aria-describedby="file-help">
+  </div>
+  <ul id="file-list" class="file-list" aria-live="polite"></ul>
+  <div class="button-group">
+    <button class="btn btn--primary btn--full" type="submit">カレンダーを作成</button>
+  </div>
 </form>
-<h2>カレンダーアプリへの追加</h2>
-<p><strong>Google Calendar:</strong> 設定の「カレンダーを追加」から「URLで追加」を選び、作成後のURLを貼り付けます。</p>
-<p><strong>Appleカレンダー:</strong> 「ファイル」→「新規照会カレンダー」でURLを登録します。</p>
-<p><strong>Outlook:</strong> 「予定表を追加」→「Webから購読」でURLを登録します。</p>
-</main></body>
-"""
+{_calendar_guides_html("作成後のURLを貼り付けます")}
+<script>
+(() => {{
+  const input = document.getElementById("file");
+  const list = document.getElementById("file-list");
+  if (!input || !list) return;
+  input.addEventListener("change", () => {{
+    list.textContent = "";
+    for (const file of input.files || []) {{
+      const li = document.createElement("li");
+      li.textContent = file.name;
+      list.appendChild(li);
+    }}
+  }});
+}})();
+</script>"""
+    return _page_layout("トップ", body)
 
 
 def _result_page(calendar_name: str, url: str, course_count: int) -> str:
     safe_name, safe_url = escape(calendar_name), escape(url)
-    return f"""<!doctype html>
-<html lang="ja"><head><meta charset="utf-8"><link rel="stylesheet" href="{PUBLIC_PATH}/static/style.css"><title>作成しました</title></head>
-<body><main><h1>作成しました</h1>
-<p>{safe_name}（{course_count}科目）のカレンダーを作成しました。</p>
-<p><a class="url" href="{safe_url}">https://yhop.net{safe_url}</a></p>
-<h2>カレンダーアプリへの追加</h2>
-<p><strong>Google Calendar:</strong> 設定の「カレンダーを追加」から「URLで追加」でURLを登録します。</p>
-<p><strong>Appleカレンダー:</strong> 「ファイル」→「新規照会カレンダー」でURLを登録します。</p>
-<p><strong>Outlook:</strong> 「予定表を追加」→「Webから購読」でURLを登録します。</p>
-<p><a href="{PUBLIC_PATH}/">別のカレンダーを作成</a></p>
-</main></body></html>"""
+    full_url = f"https://yhop.net{safe_url}"
+    body = f"""<div class="banner banner--success" role="status">
+  <svg class="banner__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+    <path d="M7.5 12.5L10.5 15.5L16.5 9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1 class="banner__title">カレンダーを作成しました</h1>
+    <p class="banner__body">{safe_name}（{course_count}科目）のカレンダーを作成しました。</p>
+  </div>
+</div>
+<div class="url-panel">
+  <span class="url-panel__label">購読用カレンダー URL</span>
+  <div class="url-panel__row">
+    <a id="calendar-url" class="url" href="{safe_url}">{full_url}</a>
+    <button id="copy-url-btn" class="btn btn--outline" type="button">URLをコピー</button>
+  </div>
+  <p id="copy-status" class="copy-status" aria-live="polite"></p>
+</div>
+{_calendar_guides_html("URLを登録します", url)}
+<div class="button-group">
+  <a class="btn btn--outline" href="{PUBLIC_PATH}/">別のカレンダーを作成</a>
+</div>
+<script>
+(() => {{
+  const btn = document.getElementById("copy-url-btn");
+  const link = document.getElementById("calendar-url");
+  const status = document.getElementById("copy-status");
+  if (!btn || !link || !status) return;
+  btn.addEventListener("click", async () => {{
+    try {{
+      await navigator.clipboard.writeText(link.textContent.trim());
+      status.textContent = "URLをクリップボードにコピーしました。";
+    }} catch {{
+      status.textContent = "コピーに失敗しました。URLを手動で選択してコピーしてください。";
+    }}
+  }});
+}})();
+</script>"""
+    return _page_layout("作成しました", body)
 
 
 def _error_page(message: str) -> HTMLResponse:
-    return HTMLResponse(
-        f"""<!doctype html><html lang="ja"><head><meta charset="utf-8"><link rel="stylesheet" href="{PUBLIC_PATH}/static/style.css"><title>作成できません</title></head>
-<body><main><h1>作成できません</h1><p class="error">{escape(message)}</p><p><a href="{PUBLIC_PATH}/">入力画面へ戻る</a></p></main></body></html>""",
-        status_code=502,
-    )
+    body = f"""<div class="banner banner--error" role="alert">
+  <svg class="banner__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+    <path d="M12 7.5V13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="12" cy="16.5" r="1.25" fill="currentColor"/>
+  </svg>
+  <div>
+    <h1 class="banner__title">カレンダーを作成できませんでした</h1>
+    <p class="banner__body">{escape(message)}</p>
+  </div>
+</div>
+<div class="button-group">
+  <a class="btn btn--outline" href="{PUBLIC_PATH}/">入力画面へ戻る</a>
+</div>"""
+    return HTMLResponse(_page_layout("作成できません", body), status_code=502)
 
 
 @app.post("/upload")
