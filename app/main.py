@@ -26,6 +26,8 @@ syllabus_client = SyllabusClient(
     cache_ttl=float(os.getenv("SYLLABUS_CACHE_TTL", "86400")),
 )
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+if PUBLIC_PATH:
+    app.mount(f"{PUBLIC_PATH}/static", StaticFiles(directory=Path(__file__).parent / "static"), name="public_static")
 
 
 def _page_layout(title: str, body_html: str) -> str:
@@ -67,7 +69,7 @@ def _page_layout(title: str, body_html: str) -> str:
 
 
 _EXTERNAL_ICON = (
-    '<svg class="external-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">'
+    '<svg class="external-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">'
     '<path d="M6 3.5H3.5C2.95 3.5 2.5 3.95 2.5 4.5V12.5C2.5 13.05 2.95 13.5 3.5 13.5H11.5C12.05 13.5 12.5 13.05 12.5 12.5V10" '
     'stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'
     '<path d="M9.5 2.5H13.5V6.5M13.5 2.5L7.5 8.5" '
@@ -153,7 +155,7 @@ def _result_page(calendar_name: str, url: str, course_count: int) -> str:
     safe_name, safe_url = escape(calendar_name), escape(url)
     full_url = f"https://yhop.net{safe_url}"
     body = f"""<div class="banner banner--success" role="status">
-  <svg class="banner__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+  <svg class="banner__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
     <path d="M7.5 12.5L10.5 15.5L16.5 9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>
@@ -195,7 +197,7 @@ def _result_page(calendar_name: str, url: str, course_count: int) -> str:
 
 def _error_page(message: str) -> HTMLResponse:
     body = f"""<div class="banner banner--error" role="alert">
-  <svg class="banner__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+  <svg class="banner__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
     <path d="M12 7.5V13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
     <circle cx="12" cy="16.5" r="1.25" fill="currentColor"/>
